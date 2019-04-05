@@ -1,0 +1,829 @@
+setwd("~/MyRdirectory/microarray_NGS cripts/noro_rota")
+library(affy)
+
+d1<-ReadAffy() #Read in phenodata
+pData (d1)<- read.table("PhenoData.txt", header=T,   row.names =1, sep="\t")
+pData(d1) = read.table("noro_rota_covariates.txt", header=TRUE, row.names=1, sep="\t", quote="")
+pData(d1) 
+d1
+image(d1[,1]) # to see the image of fluorescent signals for sample 1
+hist(d1)
+boxplot(d1)
+library(oligo)
+library(pd.mirna.4.0)
+library(dplyr)
+
+rawData <- read.celfiles(list.celfiles(), pkgname="pd.mirna.4.0")
+rawData
+class(rawData)
+
+experimentData(rawData) # i have to fill this later
+assayData(rawData) # i t will appear after normalizaion
+
+exprs(rawData)[1:4, 1:4]
+sampleNames(rawData) # i should rename this
+
+featureNames(rawData) # i need to annotate in order to have probe names here
+head(pData(rawData))
+pData(rawData)[1] <- NULL
+pData(rawData) # an empty data frame, i need to add columns
+
+
+
+cov1<- read.csv("batch_analyses.csv", header = T) # reading the dataset containing covariates
+
+cov2 = read.table("noro_rota_covariates.txt", header=TRUE, row.names=1, sep="\t", quote="")# 
+
+# defining the phenotype data of each sample (columns of exprs(rawData))
+
+exprs(rawData)[, 1]
+head(exprs(rawData))
+par(mfrow=c(1,2))
+
+hist(exprs(rawData)[, 1])
+hist(log2(exprs(rawData[,1])))
+hist(1/(exprs(rawData)[, 1])) # the inverse function gives normally distributed intensity scores
+
+#e = 1/(exprs(rawData))
+
+
+# Making an MA plot 
+
+#m1 = rowMeans(e[,1:8])
+#m2 = rowMeans(e, 11:12)
+#a = rowMeans(e)
+#plot(a, m2-m1)
+#which.min(m2-m1) # to see the probe name with the least gene expr
+#s1 = rowSds(e[,1:10])
+#s2 = rowSds(e, 11:20)
+#ttest = (m2-m1/)sqrt(s1^2/8 + s2^2/12)
+# hist(ttest) # it should look normally distr
+# plot histogram of pvalues. # if the shape is uniform, then no diff expr gene
+
+
+# later i will explore the effect of using the normally distributed, and t-test
+
+
+# lets provide infos for our pdata 
+pData(rawData)$condition = cov2$cat_true
+pData(rawData)$category_init = cov2$category
+pData(rawData)$kit_batch = cov2$kit
+pData(rawData)$RNAconc = cov2$RNA
+pData(rawData)$RNAelut = cov2$Elution
+pData(rawData)$RNAextr.date = cov2$DateRNAextrac
+pData(rawData)$realsamplno= cov2$sample
+pData(rawData)$RNAextr.date = cov2$DateRNAextrac
+pData(rawData)$monthRNAextr= cov2$MonthRNAextr
+pData(rawData)$elutionvol= cov2$ElutionVol
+pData(rawData)$scanner_type = cov2$scanner.type
+pData(rawData)$scanner.id = cov2$scanner.id
+pData(rawData)$scan.date = cov2$scan.date
+pData(rawData)$scanner.serial.number= cov2$scanner.serial.number
+pData(rawData)$shipm_batch = cov2$shipment._batch
+pData(rawData)$file.creator= cov2$file.creator
+pData(rawData)$newnames = cov2$newnames
+
+
+library(tibble)
+annot4_0 <- read.csv("miRNA-4_0-st-v1.annotations.20160922.csv", comment.char = "#")# annotation file
+annot4_0 = as.tibble(annot4_0)
+
+#filtering
+
+#You often need to remove the low expression or the low count features to be able to really be able to see the distribution of the data. So to do that I'm going to make the data set a data frame so that I can use the dplyr filtering commands
+# We can remove rows that are mostly = zero and notice any differences in the distributions across samples.
+
+edata = as.data.frame(exprs(rawData))
+boxplot(as.matrix(log2(edata+1)),col=2) # boxplot of raw signal, many outliers,
+summary(edata) # all my samples all have  a median of 35
+low_genes2 = rowMedians(as.matrix(edata)) < 5 #(from MOOc)
+filt_edata2 = filter(edata,!low_genes2) # only keep not low genes
+dim(filt_edata2) # the new filtered dataset only contains features with median count >5
+
+boxplot(as.matrix(log2(filt_edata2+1)),col=2) # after filtering, the same boxplot above has changed
+
+
+
+
+
+normData = oligo::rma(rawData) # to normalize the expression signal using RMA method
+normData # now the probes have been labelled.
+head(normData)
+edata<- exprs(normData)
+boxplot(as.matrix(edata+1),col=2) # normalized data looks pretty much symetrical, but there are lots of outliers
+
+
+# data match the number of columns of expression data, and indeed that the row and column
+# names are identically ordered:
+all(rownames(cov2)==colnames(exprs))
+
+# meta-data to describe the covariates associated to the patients
+
+
+metadata <- data.frame(labelDescription=c("sample category B or V status",
+                                          "RNA conc", "Elution vol", "sample label","DateRNAextrac", "kit",  "month of RNA extraction", 
+                                          "ElutionVol", "scanner.type","scanner.id", "scan.date", "file.creator" , "scanner.serial.number","Batch 1 or second batch of shipment", "detailed and short name of samples"),
+                       row.names=c("cat_true","RNA", "Elution", "sample" , "DateRNAextrac", "kit lot 1 or lot 2", "MonthRNAextr","ElutionVol", "scanner.type", "scanner.id", "scan.date", "file.creator", 
+                                   "scanner.serial.number", "shipment._batch", "newnames"))
+
+# i will check the labelling later
+
+pData(normData)
+#Objects of class "AnnotatedDataFrame" put together patients covariates with its metdata:
+phenoData <- new("AnnotatedDataFrame",  data=cov2,  varMetadata=metadata)
+phenoData #now everything is ok
+library(dplyr)
+pData(normData) = pData(normData) %>% arrange(pData(normData)$condition) # to sort 1st column
+pData(normData)
+
+# accessing slots of the object phenoData:
+phenoData@data
+phenoData@varMetadata
+
+
+
+# character slot is used, indicating the type of the chip:
+annotation <- "pd.mirna.4.0"
+# But it is also possible to record information about features that are unique to the experiment
+# (e.g., flagging particularly relevant features). This is done by creating or modifying an An-
+# notatedDataFrame like that for phenoData but with row names of the AnnotatedDataFrame
+# matching rows of the assay data:
+
+#gene.symbols <- unlist(mget(rownames(exprs),hgu95av2SYMBOL));
+gene.symbols = annot4_0$Transcript.ID.Array.Design.
+species = annot4_0$Species.Scientific.Name
+
+head(gene.symbols)
+length(rownames(exprs(normData)))
+length(gene.symbols)
+
+# create the annotated dataframe and metadata needed for our featdata 
+featureData = data.frame(Affy=rownames(exprs(normData)), symbols=gene.symbols, species=species);
+featureData = new("AnnotatedDataFrame", data= featureData)
+class(featureData)
+fmetadata <- data.frame(labelDescription=c("Affymetrix accession", "Gene symbol"),
+                        row.names=c("Affy", "symbol"))
+featureData@varMetadata = fmetadata
+featureData@data # to see the probe names and miRNA names
+featureData@data[,2] # to see only miRNA names
+
+
+normData@featureData = featureData
+normData@featureData # i have just finished annotating the normalized data (in the slot featureData)
+
+head(exprs(normData))
+
+# removing probes that are not for human non coding RNA
+
+write.table(exprs(normData), file="normData.txt") # to export the normalized dataset
+
+
+
+# QC before normalization
+library(arrayQualityMetrics)
+arrayQualityMetrics(expressionset =  rawData, 
+                    force = T,
+                    intgroup = c("condition", "kit_batch", 
+                                 "monthRNAextr", "shipm_batch"))
+
+# our B and V do not cluster together, why ? batch effects ? or biological reason ? 
+# we wil explore the possibiblity of batch effects 
+
+
+# diagnostic plots for  miRNA data can be used to evaluate the need and
+#effectiveness of normalization procedures. These plots
+#can also serve as aids to determine outlying arrays and
+#batch effects. One such plot is the kernel density estimate
+#for each array, for different types of probes
+
+library(arrayQualityMetrics)
+arrayQualityMetrics(expressionset =  normData, 
+                    force = T,
+                    intgroup = c("condition", "shipm_batch"))
+
+
+annotateEset(eset, hgu10sttranscriptcluster.db)
+
+# 3) QC: PCA and svd---------------------------------------------------------------------
+
+  
+What is svd ? 
+
+# we'd like to find the best matrix created with fewer variables (that is, a lower
+# rank matrix) that explains the original data. This is related to data compression.
+# Two related solutions to these problems are PCA which stands for Principal Component Analysis and SVD, Singular Value Decomposition.
+#This latter simply means that we express a matrix X of observations (rows) and variables (columns) as the product of 3 other matrices, i.e., X=UDV^t. This last term (V^t) represents the transpose of the matrix V
+
+# Here U and V each have orthogonal (uncorrelated) columns. U's columns are the left singular
+# vectors of X and V's columns are the right singular vectors of X.  D is a diagonal matrix, by
+# which we mean that all of its entries not on the diagonal are 0. The diagonal entries of D are the singular values of X.
+
+read.csv("mat.csv")
+svd(mat) # if we save matrix u and matrix v into matu and matv , multiplying matu and diag and t(matv) wil give us mat
+matu %*% diag %*% t(matv) # so The diagonal entries of D are the singular values of X.
+
+what is pca? 
+  #Now we'll talk a little about PCA, Principal Component Analysis, "a simple, non-parametric method for extracting relevant information from confusing data sets." We're quoting here from a very nice | concise paper on this subject which can be found at http://arxiv.org/pdf/1404.1100.pdf. The paper
+  # by Jonathon Shlens of Google Research is called, A Tutorial on Principal Component Analysis.
+svd(scale(mat))
+prcomp(scale(mat)) # Notice that the principal components of the scaled matrix,ARE the columns of V, the right singular values
+# PCA and svd all yield similar information
+svd1$d # SVD explains the variance (same as variance expained in pca)
+# one problem with pca and svd is that they can not deal with missing data
+#if there are missing data we need to impute them using knn packge
+
+#http://www.iu.a.u-tokyo.ac.jp/~kadota/r.html#analysis_clustering_nonhierarchical_prcomp
+
+library(affycoretools)
+plotPCA(exprs(normData), groups = pData(normData)$condition, groupnames = NULL,
+        addtext = NULL, x.coord = NULL, y.coord = NULL, screeplot = T,
+        squarepca = FALSE, pch = NULL, col = NULL, pcs = c(1, 2),
+        legend = TRUE, main = "scree Plot", plot3d = FALSE, outside = FALSE)# to make a 2Dd plot
+
+
+plotPCA(exprs(normData), groups = pData(normData)$condition, groupnames = levels(pData(normData)[,1]),
+        addtext = sub(".*-", "", colnames(exprs(normData))), x.coord = NULL, y.coord = NULL,squarepca = T, pch = NULL, col = NULL, pcs = c(1, 2),
+        legend = TRUE, main = "Principal Components Plot; noro vs rota", plot3d = FALSE, outside = F)# to make a 2Dd plot
+
+
+plotPCA(exprs(normData), groups = pData(normData)$condition, groupnames = levels(pData(normData)[,2]),
+        addtext = sub(".*-", "", colnames(exprs(normData))), x.coord = NULL, y.coord = NULL,squarepca = T, pch = NULL, col = NULL, pcs = c(1, 2),
+        legend = TRUE, main = "Principal Components Plot; noro vs rota", plot3d = FALSE, outside = F)#  group name is now the kit used
+
+
+
+plotPCA(exprs(normData), groups = pData(normData)$condition, groupnames = levels(pData(normData)[,1]),
+        x.coord = NULL, y.coord = NULL,squarepca = FALSE, pch = NULL, col = NULL, pcs = c(1,2,3),
+        legend = TRUE, main = "Principal Components Plot; noro vs rota", plot3d = TRUE, outside = FALSE)# to make a 2Dd plot
+
+
+
+
+# demo on making pca using affycoretools
+library("affy")
+data(sample.ExpressionSet)
+plotPCA(sample.ExpressionSet, groups =
+          as.numeric(pData(sample.ExpressionSet)[,2]), groupnames = levels(pData(sample.ExpressionSet)[,2]))
+
+
+library(tibble)
+ann = annot4_0 %>% rename(geneid=Probe.Set.Name)
+ann
+
+table(ann$Species.Scientific.Name)
+
+pca = prcomp(data, scale=T)
+summary(pca)
+PCA_val=pca$x
+a=rownames(PCA_val)
+PCA_val= as.tibble(PCA_val)
+PCA_val$geneid = a
+head(PCA_val)
+plot(pca, type="l") # to see the scree plot
+
+exprs(normData)
+
+# extract PC scores
+library(ggplot2)
+summary = apply(data, 2, summary) # to see the summary stats for each column, and see the overall distribution of each gene
+
+# the expression signal is clearly not normally distributed. is this a risk for downstream analyses ? we are doing a moderated t-test
+
+head(summary)
+as.tibble(summary)
+      
+glimpse(pca)
+pca2= prcomp(t(data), scale = T)
+pca2$x
+data2 = cbind(data, pca$x[, 1:2])
+head(data2)
+ggplot(data=data2, mapping = aes(PC1, PC2, col=colnames(data2)) )
+
+head(exprs(normData))
+which(rownames(normData)== "ENSG00000206849_st") # the id for snoRNA (ENSG00000206849)
+exprs(normData)[526, ] # its probe set name is ENSG00000206849_st is at index no 526
+e = exprs(normData)
+gene = exprs(normData)[526, ]   
+class(gene)
+gene = data.frame(group = colna)
+Index1 = which(normData$condition=="noro")
+Index2 = which(normData$condition=="rota")
+plot(rowMeans(e[,Index1]), rowMeans(e[,Index2]), pch=".",  main="Scatter plot of noro(index1) vs rota (index2)")
+
+# mayuko sensei requested this plot 
+
+value = c(2.792097,1.023203, 2.189799, 4.285551, 1.767875, 2.249263, 2.403837,2.249263,1.188485, 2.193872, 4.482345)
+names = colnames(exprs(normData))
+gene = data.frame(names, value)
+gene$names = sub(".*_", "", gene$names)
+gene$names = sub(".CEL$", "", gene$names)
+boxplot(sat$age~sat$sexe, ylab = "age")
+boxplot(sat$age~sat$sexe, ylab = "age")
+boxplot(gene$value~gene$names, ylab="category")
+library(ggplot2)
+p=ggplot(gene, aes(x=gene$names, y=gene$value)) + geom_boxplot()  
+p + geom_dotplot(binaxis='y', stackdir='center', dotsize=0.5) + ggtitle("Expression signal(log2) of ENSG00000206849_st between noro and rota") 
+
+
+
+# Scree plot --------------------------------------------------------------
+
+
+PCA_val# to coeficiaents used to compute PCA 
+summary(pca)
+screeplot(pca, type="line")
+abline(h=0.5, col="red", lty=3)
+abline(h=1, col="red", lty=3) # the 2 first components explain most of the variance; thus a 2d PCA should be OK.
+
+
+
+#if we want to know how many components to select
+pca$sdev
+pca$sdev^2 # to obtain variance
+which(pca$sdev^2 > 1) #we will select pca 1 and pca2
+
+human=grep("Homo sapiens",ann$Species.Scientific.Name) # retain all sequences for homo sapiens. 
+
+# 
+grep("controls", ann$Transcript.ID.Array.Design.)
+grep("14q0_st", PCA_val$geneid)
+
+# i need to do PCA and find the meaning of PCA1 or PCA2
+# to do that i need to label the PCA coeficients with the probes information
+
+
+merged = right_join(ann, PCA_val) # there are 32580 observations
+merged=merged[human, ] # now only 6631 human non coding RNA (miRNA, snoRNA), but i also need to remove 
+merged
+controls <- grep("control",merged$Transcript.ID.Array.Design.) # The human control probes names start with AFFX, so you can also:
+spikein <- grep("control", topnororota$Affy) # the spike in controls
+
+merged$Transcript.ID.Array.Design.
+write.csv(human, "hsanororota_PCA.csv")
+
+# open file in excell
+# sort by pca 1
+# sort by Species Scientific Name = "homosapiens" 
+# copy the first 20 mirna and paste in MIRDIP http://ophid.utoronto.ca/mirDIP/index.jsp#r
+# http://ophid.utoronto.ca/mirDIP/index.jsp
+
+#  get the gene id from mirDIP 
+# copy the names of mirDip, and paste into panther
+# use panther for Funtionnal prediction
+# http://www.pantherdb.org/chart/pantherChart.jsp?listType=1&filterLevel=1&type=1&chartType=1&save=yes&basketItems=all&zoom=1&trackingId=F7A880754366E5AF7DCB57C8A2328886
+
+
+
+# Making 3D or 2D this a 2d or even 3d pca will not contain all th --------
+
+library(pca3d)
+data.pca = pca$x
+
+gr <- factor(cov2$cat_true)
+
+pca3d(data.pca, group=gr, legend="bottomleft")
+pca2d(data.pca, group=gr, legend="topright", show.ellipses=F, ellipse.ci=0.75, show.plane=FALSE)
+
+
+gr <- factor(cov2$kit)
+pca2d(data.pca, group=gr, legend="topright")
+pca3d(data.pca, group=gr, legend="topright")
+
+
+gr <- factor(cov2$newnames)
+pca2d(data.pca, group=gr, legend="topright")
+pca3d(data.pca, group=gr, legend="topright")
+
+data.pca <- prcomp(t(data), scale. = T)
+names(data.pca)
+plot(data.pca$sdev, type="h", main="PCA s.d.")
+data.pca.sample <- t(data) %*% data.pca$rotation[,1:2]#・
+plot(data.pca.sample, main="PCA")      # 
+text(data.pca.sample, colnames(data), col = c(rep("red", 3), rep("black", 3),rep("blue",3)))#to label the dots on the PCA with column names
+
+plot(data.pca.sample, main="PCA")  
+text(data.pca.sample, cov2$newnames, col = c(rep("red", 3), rep("black", 3),rep("blue",3)))#
+
+
+plot(data.pca.sample, main="PCA")  
+text(data.pca.sample, cov2$newnames, col = c(rep("red", 3), rep("black", 3),rep("blue",3)))#
+
+
+text(data.pca.sample, colnames(data), col = c(rep("red", 7), rep("black", 3)))#tissue1-7 
+
+
+
+
+# -open the "PCAdata0628.txt" file in excell
+#-sort the values in PC1, copy the top 200 annotated genes identifier in PCA1 to to know the meaning of PCA1
+#-paste in David website to know the function of those genes
+
+
+
+
+# heatmap -----------------------------------------------------------------
+
+
+#if the PCA is not clear enough, change names of columns in the initial imput file
+
+heatmap(as.matrix(exprs2))
+heatmap(as.matrix(exprs2),col = cm.colors(256))
+heatmap(as.matrix(exprs2),col = cm.colors(256), scale = "column")
+heatmap(as.matrix(exprs2),col = cm.colors(156), scale = "column", margins = c(5,10))
+
+
+
+
+
+
+# Differential expression using limma ------------------------------------------------
+#Differential expression
+library(limma)
+pData(normData)[,1 ] 
+group <- factor(pData(normData)[,1] , levels = levels(pData(normData)[,1]))
+group
+design<-model.matrix (~group) ; design # is there a sign diff between rota and noro ? 
+fit1 <-lmFit(normData, design) # Fit linear model to each gene
+ebaye <- eBayes (fit1)# get p values for comparison 
+
+# uses all coeficients of genes to obtain better estimates of statistical significance
+
+tab200 <- topTable(ebaye,adjust = "fdr",n = 200) #Create a list of 50 genes with strongest differential  expression (highest significance)
+tab200
+
+toptable_hsa<- tab200 %>% filter(species=="Homo sapiens")
+toptable_hsa
+
+# Option coef  =2 means we are looking at the coefficient for ?? in the model, the one corresponding to the  difference between Normals and Down Syndrome  samples
+# Option adjust="fdr"means we adjust for multiple 
+#View the top two rows of the created table
+
+volcanoplot(ebaye, coef=2, xlim =c(-1,1)) 
+
+
+ggplot(tab200, aes(P.Value)) + geom_histogram(binwidth = 0.00001) + 
+  ggtitle("distribution of limma p-values Human (noro-rota), adjusted for FDR") # here the hist is still not so good, but better than the previous
+
+
+
+
+# FC by hand (for one gene only)
+
+topTable(ebaye, n=1)
+genename = rownames(topTable(ebaye, n=1))
+genename
+typeMeans = tapply(exprs(normData)[genename, ], normData$condition, mean ) # to compute mean exprs in each group
+typeMeans
+typeMeans["noro"] - typeMeans["rota"] # this is the log fold change (it should be the same)
+design = model.matrix(~ normData$cat_true)
+
+
+
+# Heatmap of DE genes -----------------------------------------------------
+
+
+
+
+library(gplots)
+eset <- exprs(normData)[toptable_hsa]
+idx = rownames(toptable_hsa)
+heatmap(exprs(normData)[idx,])
+# assume that selExpr is an ExpressionSet
+heatmap.2(exprs(normData)[idx, ],trace='none',scale='row')
+# OR, if selExpr is a matrix
+heatmap.2(selExpr[idx,],trace='none',scale='row')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Making the a differnet type of design matrix ------------------------------------------------
+
+
+design2 = data.frame(grp=c(1,1,1,2,2,2,2,2,2,2,2), rep=c(1,2,3,1,2,3,4,5,6,7,8))
+
+design2$grp <- factor(design2$grp, labels = c("noro", "rota"))
+mmat <- model.matrix( ~ 0 + design2$grp)
+colnames(mmat) <- c("noro", "rota") 
+
+
+contrast.matrix = limma::makeContrasts(noro-rota, levels = mmat) # this contrast matrix tells r that i wish to compare noro vs rota
+
+
+
+
+# tutorial https://biochem.wisc.edu/sites/default/files/facilities/bcrf/tutorials/R/R_Bioconductor/CH25/from_cel_files_to_gene_list.html#6_phenodata
+pd = design2
+pd
+rownames(pd) = sampleNames(normData)
+print(pd)
+phenoData(normData)
+pData(normData)= pd
+pData(normData)
+varMetadata(normData)
+varMetadata(normData)$labelDescription[1] <- "norovirus or rotavirus category"
+varMetadata(normData)$labelDescription[2] <- "replicate number"
+
+pData(normData)
+
+Index1 = which(normData$grp=="noro")
+Index2 = which(normData$grp=="rota")
+print(Index1)
+print(Index2)
+e = exprs(normData)
+#One way to compare a 2 sample set is simply to plot them against each other in a scatter plot.
+
+plot(rowMeans(e[,Index1]), rowMeans(e[,Index2]), pch=".",  main="Scatter plot of noro(index1) vs rota (index2)")
+
+# ranking and filterning genes
+
+d <-  rowMeans(e[, Index2]) -  rowMeans(e[, Index1])
+a <- rowMeans(e)
+
+plot(a,d) # to make an MA plot
+plot(a,d, ylim=c(-8,8)) # to make it easier to seee 
+
+#We can check how many genes have a fold change higher than 2-fold by counting absolute values above 1 since log2(2)=1
+
+sum(abs(d) > 1) # there are 450 genes with a log fold >2
+plot(a,d, ylim=c(-1,1), main="MA-plot")
+
+
+# Summary statistics and tests for ranking --------------------------------
+
+#In the previous MA plot the data varies more for small values of a and the "variance" appears smaller for larger values.
+
+#In a set of 2 groups, the t-statistic is a ratio comparing the difference of the mean of each group to that of the variance, estimated as the standard error within the group.
+
+
+library("genefilter")
+tt <- rowttests(e, factor(normData$grp))
+class(tt) # dataframe
+dim(tt)
+tt[1:3, ]
+hist(tt$p.value)# it looks normal (distr of T should be homogeneous)
+
+#Genes are routinely ranked by fold change or p-value. Both entities that the volcano plot method can show simultaneously. The volcano representation plots the ???log10 of p-values on the y axis versus t
+#Another way to understand the volacano plot is that it is a plot of significance (???log10 of p-values) versus fold change.
+
+lod <-  -log10(tt$p.value)
+plot(d, lod, cex=0.25, main="Volcano plot for t-test") #The cex = 0.25 option shows each point as 1/4 size for better clarity. The line at 2 on the y axis represents a "confidence" cut-off of 1%.
+abline(h = 2) 
+
+
+sum(abs(lod) > 6) # to see outliers
+
+
+# let us make a better volcano plot with the top 20 genes
+#
+# create indexes
+o1 <- order(abs(d), decreasing = TRUE)[1:25] #First we create a set if indices corresponding to the "best 25" by ranking the t-statistic disregarding positive or negative sign using the absolute value function abs
+o2 <- order(abs(tt$statistic), decreasing = TRUE)[1:25] 
+o <- union(o1, o2)
+# redo the plot
+plot(d[-o], lod[-o], cex =  0.25, xlim = c(-1, 1), ylim = c(0, 2), main = "Close up")
+# add points to the plot
+points(d[o1], lod[o1], pch = 18, col = "blue")
+points(d[o2], lod[o2], pch = 1, col = "red")
+
+#In this example, there are too many points, so we can not see the colots.  
+#The volcano plot in the real example clearly shows that some of the most statistically significant genes do not have a high fold change associated with them (red circles)
+
+#9.2 moderated t-statistic
+
+
+#One implementation of the moderated t-test is within the limma package (Smyth 2004) based on Baysian statistics and fitting of data to a linear model (lmFit function.)
+library("limma")
+design2 <- model.matrix(~factor(normData$grp))
+design2 # to see the DE between rota and noro (rota is the 1st cat)
+
+
+# fit data to the linear model based on the design matrix
+
+fit <- lmFit(normData, design2)
+# apply baysian statistics
+ebayes <- eBayes(fit) #  we do an empirical bayes estimation (gene spec)
+names(ebayes)
+volcanoplot(ebayes, coef=2, xlim =c(-1,1)) # A volcano plot can be readily created with the limma package command volcanoplot
+ebayes$coefficients
+
+
+#The limma package command topTable will create a list of genes based on the expression values and the ebayes statistical and model fitting analysis showing various criteria
+
+# default run outputs 10 genes - Note the name of the columns:
+topTable(ebayes,coef=1)
+
+unadjust = topTable(ebayes, coef=1,genelist=fit$genes, adjust.method=NULL,
+                    resort.by=NULL, confint=FALSE)
+hist(unadjust$P.Value) # checking the shape of pvalues distribution. it does not look very good
+
+
+ggplot(unadjust, aes(P.Value)) + geom_histogram(binwidth = 0.0000000000000000000001) + 
+  ggtitle("distribution of limma pvalues ALL (noro-rota), un-adjusted with FDR") # here the hist is not so good
+
+# For more hints on how to interprete the graph
+http://varianceexplained.org/statistics/interpreting-pvalue-histogram/
+  
+  
+  adjustBH= topTable(ebayes,genelist=fit$genes, adjust.method="BH",
+                     sort.by="p", resort.by=NULL, confint=FALSE)
+adjustBH
+glimpse(adjustBH)
+as.tibble(adjustBH)
+adjustBH_hsa=adjustBH[grep("hsa", adjustBH$symbols), ]
+
+ggplot(adjustBH_hsa, aes(P.Value)) + geom_histogram(binwidth = 0.01) + 
+  ggtitle("distribution of limma p-values Human (noro-rota), adjusted for FDR") # here the hist is still not so good, but better than the previous
+
+
+topnororota <- topTable(ebayes, coef=1, number=nrow(ebayes)/4, sort.by="P")
+ggplot(topnororota, aes(P.Value)) + geom_histogram(binwidth = 0.0000001) + 
+  ggtitle("distribution of limma p-values all organisms (noro-rota), adjusted for FDR") # here the hist is still not so good, but better than the previous
+
+controls <- grep("AFFX",topnororota$Affy) # The control probes names start with AFFX, so you can also:
+spikein <- grep("control", topnororota$Affy) # the spike in controls
+hsa = grep("hsa", topnororota$Affy)
+
+topnororota_hsa1 = topnororota[-controls, ]
+topnororota_hsa2 = topnororota_hsa1[-spikein, ]
+head(topnororota_hsa2)
+topnororota_hsa3= topnororota_hsa2[grep("hsa", topnororota_hsa2$symbols), ]
+
+ggplot(topnororota_hsa, aes(P.Value)) + geom_histogram(binwidth = 0.0000001) + 
+  ggtitle("distribution of limma p-values all organisms (noro-rota), adjusted for FDR") # here the hist is still not so good, but better than the previous
+
+ggplot(topnororota_hsa3, aes(P.Value)) + geom_histogram(binwidth = 0.0000001) + 
+  ggtitle("distribution of limma p-values humans (noro-rota), adjusted for FDR") # here the hist is still not so good, but better than the previous
+
+
+as.tibble(topnororota_hsa3)
+
+topnororota$FC <- 2^(topnororota_hsa$logFC) # to see the real value of the fold change (because we initially applied log)
+
+sig_noro_rota <- topnororota_hsa[topnororota_hsa$adj.P.Val<.05,] # to subset and select all miRNA with a adju pvalue < 0.05
+
+
+# the total opposite of what i would have expected
+
+
+# a right skewed histo --> presence of unaccounted batch effect
+# a left skewed histo --> ok 
+# a uniform distr --> no sign differnece in the comparison groups
+# In the qvalue vignette, it states data with a U-shaped p-value histogram is a red flag
+
+
+
+
+
+
+
+
+# Now we can use the same method as before to index the 25 "best" genes for fold change and p-values. We can create the following indices:
+
+# p1 : index of the 25 with most fold change, regardless of up or down
+p1 <- order(abs(tableTop$logFC), decreasing= TRUE)[1:25]
+length(p1)
+
+p2 <- order(abs(tableTop$P.Val), decreasing = FALSE)[1:25]
+length(p2)
+
+# union of p1 and p2. Some are not the same hence length is more than 25
+p <- union(p1,p2) # to merge the two vectors in to one containing both
+length(p)
+#We could see the values for the "selected" points by using the following code:
+
+tableTop[p1,]
+tableTop[p2,]
+
+
+# We can then "manually" create the volcano plot, by first plotting points except those we want to recolor later, so we remove them with [-p].
+
+plot(tableTop$logFC[-p], -log10(tableTop$P.Val[-p]), cex =0.25, xlim = c(-1, 1), ylim = c(0, 7), xlab = "log2 fold change", ylab = "Log Odds")
+# Then add the points with the same colors as before:
+points(tableTop$logFC[p1], -log10(tableTop$P.Val)[p1], pch = 18, col = "blue")
+points(tableTop$logFC[p2], -log10(tableTop$P.Val)[p2], pch = 1, col = "red")
+
+
+#10 Selecting cutoffs
+
+# Should we use the "typical" p-value cut-off of 0.05 or 0.01 often used in statistic?
+#10.1 Multiple testing problem
+# we performed t test for more than 20 000 t-tests 
+# Ho= gene is not diff expessed
+# H1 = gene is diff expressed
+
+# If we assume that none of the genes are differentially expressed at a confidence level of 0.01 we would expect 
+# the following number of false positives in our list: 0.01 x 20.000 =  200 
+
+
+#We can see how many genes have a p-value lower than 0.01 in our dataset:
+
+table(tt$p.value <= 0.01) # there are 275 genes with p-value lower than 0.01
+
+
+# 10.2 FDR: False Discovery Rate
+# Satistic reminder: Type I and Type II Errors
+
+# FDR is an option that can be selected when saving a list of gene with the topTable command from the limma package when we invoke adjust = "fdr" as we shall do in the next section.
+
+
+#11 Annotation; generating a report
+
+# We have used the topTable command above to same the data for all genes. The default adjustment of p-values is that of fdr (also called BH) and therefore we have already saved this data into R object tableTop above.
+
+# We can review the first 5 genes in the list:
+
+
+tableTop[1:5, ]
+
+
+
+# 11.1 Annotation
+
+# We can create a variable containing the names in this form:
+genenames <- rownames(tableTop)
+length(genenames)
+
+#11.2 Saving into a text file
+
+We could save the file into a plain, tab- or comma-delimited text file containing all results with the write.table or the write.csv command:
+  
+  write.csv(T2, file = "T2.csv")
+
+
+# subset T2:
+subT2 <- T2[1:25, ]
+htmlpage(subT2[1], filename = "report25.html", title = "HTML report for 25", othernames = subT2[-1], table.head =  colnames(subT2))
+
+
+# adding more annotation
+source("http://bioconductor.org/biocLite.R")
+biocLite(c("annaffy"))
+
+
+# 11.6 Opening an HTML file from within R
+
+# The question was posed on stackoverflow.com as: "How to open a local html file from R in an operating system independent way?"
+
+# The answer provided is to create a simple function, assuming the current directory obtaied by getwd:
+
+# create a function to open an HTML file"
+openHTML <- function(x) browseURL(paste0('file://', file.path(getwd(), x)))
+
+# Open the "report25.html" created earlier. THis will open your DEFAULT browser:
+openHTML("report25.html")
+
+
+
+
+
+
+
+
+###################################################
+### code chunk number 38: Estimates
+###################################################
+fit <- lmFit(ndata, mmat, ndups=4,
+             correlation=corfit$consensus)
+fitc <- contrasts.fit(fit, contrast.matrix)
+fitc <- eBayes(fitc)
+
+fit2 = lm.fit() #A distributional assumption is needed because we want to estimate the probability of extreme events (large fold change just appearing by chance) from limited replicates. The negative binomial (a.k.a. Gamma-Poisson) is a good choice for RNA-seq experiments because
+
+
+###################################################
+### code chunk number 39: ContrastsEstimates
+###################################################
+## First contrast
+top13v12 <- topTable(fitc, coef=1, number=nrow(ndata)/4, adjust="fdr",
+                     sort.by="P")
+top13v12$FC <- 2^(top13v12$logFC)
+sig13v12 <- top13v12[top13v12$adj.P.Val<.05,]
+
+colNames <- c("miRNA Name", "Organism", "Fold Change", "T-stat", "Adj p-value")
+names(sig13v12)[c(9,10,17,13,15)] <- colNames
+res <- xtable(sig13v12[,colNames],
+              digits=c(0,0,0,2,2,3),
+              caption="Significantly differentially expressed miRNAs for GD 13 versus 12",
+              label="tab:contrast13v12", caption.placement = "top")
+print(res, include.rownames=FALSE)
